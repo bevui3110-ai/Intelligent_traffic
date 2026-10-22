@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Quản Lý Giao Thông Thông Minh (Computer Vision & YOLOv3)</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding-bottom: 50px;
+        }
+        .navbar-custom {
+            background-color: #1e293b;
+            border-bottom: 2px solid #38bdf8;
+        }
+        .card-custom {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+        .video-container {
+            position: relative;
+            background-color: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 2px solid #38bdf8;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+        }
+        .video-stream {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .badge-status {
+            font-size: 0.9rem;
+            padding: 8px 14px;
+            border-radius: 20px;
+        }
+        .alert-warning-custom {
+            background-color: #7f1d1d;
+            border: 1px solid #ef4444;
+            color: #fca5a5;
+            font-weight: bold;
+            font-size: 1.1rem;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.65; }
+            100% { opacity: 1; }
+        }
+        .table-custom {
+            color: #e2e8f0;
+        }
+        .table-custom th {
+            background-color: #0f172a;
+            color: #38bdf8;
+            border-color: #334155;
+        }
+        .table-custom td {
+            border-color: #334155;
+            transition: color 0.3s ease;
+        }
+        .btn-custom-primary {
+            background-color: #0284c7;
+            color: #fff;
+            border: none;
+        }
+        .btn-custom-primary:hover {
+            background-color: #0369a1;
+            color: #fff;
+        }
+        .text-glow {
+            animation: glow 0.4s ease-in-out;
+        }
+        @keyframes glow {
+            0% { transform: scale(1.2); text-shadow: 0 0 12px #38bdf8; }
+            100% { transform: scale(1); text-shadow: none; }
+        }
+        .license-plate-badge {
+            background-color: #fef08a;
+            color: #000;
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            letter-spacing: 1px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            border: 1.5px solid #000;
+            display: inline-block;
+        }
+        .chart-container {
+            position: relative;
+            height: 260px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header / Navbar -->
+    <nav class="navbar navbar-custom navbar-dark mb-4 py-3">
+        <div class="container-fluid px-4">
+            <span class="navbar-brand mb-0 h1 fs-4 text-info fw-bold">
+                🚦 HỆ THỐNG QUẢN LÝ GIAO THÔNG THÔNG MINH (YOLOv3 & OpenCV)
+            </span>
+            <span class="badge bg-dark text-info border border-info px-3 py-2 fs-6" id="video-name-badge">
+                Video: {{ video_name }}
+            </span>
+        </div>
+    </nav>
+
+    <div class="container-fluid px-4">
+
+        <!-- Banner cảnh báo mật độ cao -->
+        <div id="density-alert" class="alert alert-warning-custom text-center py-3 mb-4 rounded-3 d-none">
+            ⚠️ MẬT ĐỘ GIAO THÔNG CAO! (Tổng lượng xe vượt ngưỡng cảnh báo {{ threshold }} xe/phút)
+        </div>
+
+        <div class="row g-4">
+            <!-- Cột trái: Luồng Video Trực Tiếp (MJPEG) -->
+            <div class="col-lg-8">
+                <div class="card card-custom p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="m-0 text-light fw-bold">🎥 LUỒNG VIDEO XỬ LÝ TRỰC TIẾP</h5>
+                        <span class="badge bg-success badge-status" id="live-status">🔴 LIVE STREAMING</span>
+                    </div>
+
+                    <div class="video-container">
+                        <img src="{{ url_for('video_feed') }}" class="video-stream" alt="Luồng video giao thông">
+                    </div>
+
+                    <!-- Thanh tiến trình video chỉ xem (Read-only Progress Bar) -->
+                    <div class="mt-3 p-2 bg-dark rounded border border-secondary">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="small text-info fw-bold">⏳ TIẾN TRÌNH XỬ LÝ VIDEO</span>
+                            <span id="progress-text" class="small text-light font-monospace">Đang xử lý: 00:00 / 00:00 (0%)</span>
+                        </div>
+                        <div class="progress bg-secondary" style="height: 12px; pointer-events: none;">
+                            <div id="video-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" 
+                                 role="progressbar" style="width: 0%; transition: width 0.3s ease;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cột phải: Bảng thống kê & Điều khiển -->
+            <div class="col-lg-4">
+
+                <!-- Card Điều Khiển Video -->
+                <div class="card card-custom p-3 mb-4">
+                    <h5 class="text-info fw-bold mb-3">⚙️ BẢNG ĐIỀU KHIỂN</h5>
+                    
+                    <!-- Form Upload Video -->
+                    <form action="{{ url_for('upload_video') }}" method="POST" enctype="multipart/form-data" class="mb-3">
+                        <label class="form-label text-slate-300 small">Tải lên video giao thông mới (Tối đa 500 MB):</label>
+                        <div class="input-group">
+                            <input type="file" name="video" accept="video/*" class="form-control form-control-sm bg-dark text-light border-secondary" required>
+                            <button type="submit" class="btn btn-sm btn-custom-primary">Tải lên & Chạy</button>
+                        </div>
+                    </form>
+
+                    <!-- Nút Tạm dừng / Tiếp tục -->
+                    <div class="mb-2">
+                        <button type="button" id="btn-pause" onclick="togglePause()" class="btn btn-warning btn-sm w-100 fw-bold text-dark">
+                            ⏸️ Tạm dừng
+                        </button>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <!-- Nút Reset Video mặc định -->
+                        <form action="{{ url_for('reset_video') }}" method="POST" class="w-50">
+                            <button type="submit" class="btn btn-outline-secondary btn-sm w-100 text-light">🔄 Video mặc định</button>
+                        </form>
+                        
+                        <!-- Nút Tải Log CSV -->
+                        <a href="{{ url_for('download_csv') }}" class="btn btn-success btn-sm w-50 fw-bold">
+                            📥 Tải log CSV
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Card Bảng Thống Kê Số Lượng Xe -->
+                <div class="card card-custom p-3 mb-4">
+                    <h5 class="text-info fw-bold mb-3">📊 THỐNG KÊ ĐẾM XE THỜI GIAN THỰC</h5>
+
+                    <table class="table table-bordered table-custom align-middle text-center mb-0">
+                        <thead>
+                            <tr>
+                                <th>Loại xe</th>
+                                <th class="text-success">Lên</th>
+                                <th class="text-danger">Xuống</th>
+                                <th class="text-warning">Tổng</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="text-start fw-bold">🚗 Ô tô (Car)</td>
+                                <td id="up-car" class="fw-bold">0</td>
+                                <td id="down-car" class="fw-bold">0</td>
+                                <td id="total-car" class="text-warning fw-bold">0</td>
+                            </tr>
+                            <tr>
+                                <td class="text-start fw-bold">🛵 Xe máy (Motorbike)</td>
+                                <td id="up-motorbike" class="fw-bold">0</td>
+                                <td id="down-motorbike" class="fw-bold">0</td>
+                                <td id="total-motorbike" class="text-warning fw-bold">0</td>
+                            </tr>
+                            <tr>
+                                <td class="text-start fw-bold">🚌 Xe buýt (Bus)</td>
+                                <td id="up-bus" class="fw-bold">0</td>
+                                <td id="down-bus" class="fw-bold">0</td>
+                                <td id="total-bus" class="text-warning fw-bold">0</td>
+                            </tr>
+                            <tr>
+                                <td class="text-start fw-bold">🚚 Xe tải (Truck)</td>
+                                <td id="up-truck" class="fw-bold">0</td>
+                                <td id="down-truck" class="fw-bold">0</td>
+                                <td id="total-truck" class="text-warning fw-bold">0</td>
+                            </tr>
+                            <tr class="table-dark">
+                                <td class="text-start fw-bold text-info">TỔNG CỘNG</td>
+                                <td id="total-up" class="fw-bold text-success">0</td>
+                                <td id="total-down" class="fw-bold text-danger">0</td>
+                                <td id="grand-total" class="fw-bold text-warning fs-5">0</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Card Thông Số Vận Hành -->
+                <div class="card card-custom p-3">
+                    <h5 class="text-info fw-bold mb-3">📈 THÔNG SỐ VẬN HÀNH</h5>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span class="text-slate-400">Số xe trong khung hình:</span>
+                        <span id="current-density" class="fw-bold text-white fs-6">0 xe</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span class="text-slate-400">Tốc độ trung bình:</span>
+                        <span id="avg-speed" class="fw-bold text-warning fs-6">0 km/h</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <span class="text-slate-400">Số vụ vi phạm phát hiện:</span>
+                        <span id="violations-count" class="badge bg-danger fs-6">0 vụ</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <span class="text-slate-400">Trạng thái mật độ:</span>
+                        <span id="density-status-badge" class="badge bg-success">Bình thường</span>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- PHẦN 2 - DASHBOARD PHÂN TÍCH & BIỂU ĐỒ THỜI GIAN THỰC (CHART.JS) -->
+        <div class="row g-4 mt-2">
+            <div class="col-lg-7">
+                <div class="card card-custom p-3">
+                    <h5 class="text-info fw-bold mb-3">📈 BIỂU ĐỒ DIỄN BIẾN LƯU LƯỢNG XE & TỐC ĐỘ (CHART.JS)</h5>
+                    <div class="chart-container">
+                        <canvas id="lineChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-5">
+                <div class="card card-custom p-3">
+                    <h5 class="text-info fw-bold mb-3">🍰 TỈ LỆ CÁC LOẠI PHƯƠNG TIỆN (%)</h5>
+                    <div class="chart-container">
+                        <canvas id="doughnutChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PHẦN 3 - NHẬT KÝ VI PHẠM GIAO THÔNG & NHẬN DIỆN BIỂN SỐ XE (ANPR) -->
+        <div class="row g-4 mt-2">
+            <div class="col-12">
+                <div class="card card-custom p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="text-danger fw-bold m-0">🚨 BẢNG NHẬT KÝ VI PHẠM GIAO THÔNG & BIỂN SỐ XE (ANPR/ALPR)</h5>
+                        <span class="badge bg-danger fs-6" id="violation-total-badge">0 vụ vi phạm</span>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-custom align-middle text-center mb-0">
+                            <thead>
+                                <tr>
+                                    <th>STT</th>
+                                    <th>Thời gian</th>
+                                    <th>Biển số xe (ANPR)</th>
+                                    <th>Loại xe</th>
+                                    <th>Hành vi vi phạm</th>
+                                    <th>Tốc độ</th>
+                                    <th>Bằng chứng</th>
+                                </tr>
+                            </thead>
+                            <tbody id="violations-tbody">
+                                <tr>
+                                    <td colspan="7" class="text-muted py-3">Chưa ghi nhận vi phạm giao thông nào...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Modal xem ảnh bằng chứng vi phạm phóng to -->
+    <div class="modal fade" id="evidenceModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title text-danger fw-bold" id="modal-title">📷 ẢNH BẰNG CHỨNG VI PHẠM GIAO THÔNG</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img id="modal-img" src="" class="img-fluid rounded border border-danger mb-3" style="max-height: 450px;" alt="Bằng chứng vi phạm">
+                    <div class="p-3 bg-secondary bg-opacity-25 rounded border border-secondary text-start">
+                        <p class="mb-1"><strong>Biển số xe (ANPR):</strong> <span id="modal-plate" class="license-plate-badge">--</span></p>
+                        <p class="mb-1"><strong>Loại phương tiện:</strong> <span id="modal-vtype">--</span></p>
+                        <p class="mb-1"><strong>Lỗi vi phạm:</strong> <span id="modal-vviolation" class="text-danger fw-bold">--</span></p>
+                        <p class="mb-1"><strong>Tốc độ ghi nhận:</strong> <span id="modal-vspeed" class="text-warning">--</span></p>
+                        <p class="mb-0"><strong>Thời gian:</strong> <span id="modal-vtime" class="text-info">--</span></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap 5 JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- JavaScript tự động cập nhật số liệu thời gian thực & Khởi tạo Chart.js -->
+    <script>
+        // Cấu hình Chart.js
+        const ctxLine = document.getElementById('lineChart').getContext('2d');
+        const ctxDoughnut = document.getElementById('doughnutChart').getContext('2d');
+
+        const lineChart = new Chart(ctxLine, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: 'Lưu lượng xe (Tổng)',
+                        data: [],
+                        borderColor: '#38bdf8',
+                        backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    },
+                    {
+                        label: 'Tốc độ TB (km/h)',
+                        data: [],
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'transparent',
+                        borderDash: [5, 5],
+                        tension: 0.3
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+                    y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } }
+                },
+                plugins: {
+                    legend: { labels: { color: '#f8fafc' } }
+                }
+            }
+        });
+
+        const doughnutChart = new Chart(ctxDoughnut, {
+            type: 'doughnut',
+            data: {
+                labels: ['Ô tô', 'Xe máy', 'Xe buýt', 'Xe tải'],
+                datasets: [{
+                    data: [0, 0, 0, 0],
+                    backgroundColor: ['#38bdf8', '#34d399', '#f59e0b', '#ef4444']
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { labels: { color: '#f8fafc' } }
+                }
+            }
+        });
+
+        function setVal(id, val) {
+            const el = document.getElementById(id);
+            if (el) {
+                const strVal = String(val);
+                if (el.innerText !== strVal) {
+                    el.innerText = strVal;
+                    el.classList.remove('text-glow');
+                    void el.offsetWidth;
+                    el.classList.add('text-glow');
+                }
+            }
+        }
+
+        // Gửi yêu cầu Tạm dừng / Tiếp tục
+        async function togglePause() {
+            try {
+                const res = await fetch('/toggle_pause', { method: 'POST' });
+                const data = await res.json();
+                updatePauseUI(data.is_paused);
+            } catch (err) {
+                console.error("Lỗi chuyển trạng thái Tạm dừng:", err);
+            }
+        }
+
+        function updatePauseUI(isPaused) {
+            const btn = document.getElementById('btn-pause');
+            const liveBadge = document.getElementById('live-status');
+            if (btn) {
+                if (isPaused) {
+                    btn.className = "btn btn-success btn-sm w-100 fw-bold";
+                    btn.innerText = "▶️ Tiếp tục";
+                    if (liveBadge) {
+                        liveBadge.className = "badge bg-warning text-dark badge-status";
+                        liveBadge.innerText = "⏸️ TẠM DỪNG";
+                    }
+                } else {
+                    btn.className = "btn btn-warning btn-sm w-100 fw-bold text-dark";
+                    btn.innerText = "⏸️ Tạm dừng";
+                    if (liveBadge) {
+                        liveBadge.className = "badge bg-success badge-status";
+                        liveBadge.innerText = "🔴 LIVE STREAMING";
+                    }
+                }
+            }
+        }
+
+        async function fetchStats() {
+            try {
+                const response = await fetch('/api/stats');
+                const data = await response.json();
+
+                setVal('up-car', data.up.car);
+                setVal('down-car', data.down.car);
+                setVal('total-car', data.up.car + data.down.car);
+
+                setVal('up-motorbike', data.up.motorbike);
+                setVal('down-motorbike', data.down.motorbike);
+                setVal('total-motorbike', data.up.motorbike + data.down.motorbike);
+
+                setVal('up-bus', data.up.bus);
+                setVal('down-bus', data.down.bus);
+                setVal('total-bus', data.up.bus + data.down.bus);
+
+                setVal('up-truck', data.up.truck);
+                setVal('down-truck', data.down.truck);
+                setVal('total-truck', data.up.truck + data.down.truck);
+
+                const totalUp = data.up.car + data.up.motorbike + data.up.bus + data.up.truck;
+                const totalDown = data.down.car + data.down.motorbike + data.down.bus + data.down.truck;
+                setVal('total-up', totalUp);
+                setVal('total-down', totalDown);
+                setVal('grand-total', data.total);
+
+                setVal('current-density', data.current_density + " xe");
+                setVal('avg-speed', data.avg_speed + " km/h");
+                setVal('violations-count', data.violations_count + " vụ");
+                document.getElementById('video-name-badge').innerText = "Video: " + data.video_name;
+
+                const progBar = document.getElementById('video-progress-bar');
+                const progText = document.getElementById('progress-text');
+                if (progBar) progBar.style.width = data.progress_percent + "%";
+                if (progText) progText.innerText = `Đang xử lý: ${data.current_time_str} / ${data.total_time_str} (${data.progress_percent}%)`;
+
+                updatePauseUI(data.is_paused);
+
+                const alertDiv = document.getElementById('density-alert');
+                const statusBadge = document.getElementById('density-status-badge');
+
+                if (data.is_high_density) {
+                    alertDiv.classList.remove('d-none');
+                    statusBadge.className = "badge bg-danger fs-6";
+                    statusBadge.innerText = "⚠️ MẬT ĐỘ CAO";
+                } else {
+                    alertDiv.classList.add('d-none');
+                    statusBadge.className = "badge bg-success fs-6";
+                    statusBadge.innerText = "✅ Bình thường";
+                }
+
+            } catch (err) {
+                console.error("Lỗi cập nhật thống kê:", err);
+            }
+        }
+
+        async function fetchChartData() {
+            try {
+                const response = await fetch('/api/chart_data');
+                const data = await response.json();
+
+                // Cập nhật Line Chart
+                if (data.history && data.history.length > 0) {
+                    lineChart.data.labels = data.history.map(item => item.time);
+                    lineChart.data.datasets[0].data = data.history.map(item => item.total);
+                    lineChart.data.datasets[1].data = data.history.map(item => item.avg_speed);
+                    lineChart.update('none');
+                }
+
+                // Cập nhật Doughnut Chart
+                if (data.types) {
+                    doughnutChart.data.datasets[0].data = [
+                        data.types['Ô tô'] || 0,
+                        data.types['Xe máy'] || 0,
+                        data.types['Xe buýt'] || 0,
+                        data.types['Xe tải'] || 0
+                    ];
+                    doughnutChart.update('none');
+                }
+            } catch (err) {
+                console.error("Lỗi cập nhật Chart.js:", err);
+            }
+        }
+
+        async function fetchViolations() {
+            try {
+                const response = await fetch('/api/violations');
+                const data = await response.json();
+
+                const tbody = document.getElementById('violations-tbody');
+                const badgeTotal = document.getElementById('violation-total-badge');
+                if (badgeTotal) badgeTotal.innerText = data.length + " vụ vi phạm";
+
+                if (!data || data.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" class="text-muted py-3">Chưa ghi nhận vi phạm giao thông nào...</td></tr>`;
+                    return;
+                }
+
+                let html = '';
+                data.forEach((v, idx) => {
+                    const badgeColor = v.violation_type.includes('Vượt đèn đỏ') ? 'bg-danger' : 'bg-warning text-dark';
+                    html += `
+                        <tr>
+                            <td class="fw-bold">${idx + 1}</td>
+                            <td class="small text-light">${v.time}</td>
+                            <td><span class="license-plate-badge">${v.license_plate}</span></td>
+                            <td class="fw-bold">${v.vehicle_type}</td>
+                            <td><span class="badge ${badgeColor} px-2 py-1 fs-6">${v.violation_type}</span></td>
+                            <td class="text-warning fw-bold">${v.speed} km/h</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-info" onclick="showEvidence('${v.image_url}', '${v.license_plate}', '${v.vehicle_type}', '${v.violation_type}', '${v.speed} km/h', '${v.time}')">
+                                    📷 Xem bằng chứng
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                tbody.innerHTML = html;
+
+            } catch (err) {
+                console.error("Lỗi lấy danh sách vi phạm:", err);
+            }
+        }
+
+        function showEvidence(imgUrl, plate, vtype, violation, speed, timeStr) {
+            document.getElementById('modal-img').src = imgUrl;
+            document.getElementById('modal-plate').innerText = plate;
+            document.getElementById('modal-vtype').innerText = vtype;
+            document.getElementById('modal-vviolation').innerText = violation;
+            document.getElementById('modal-vspeed').innerText = speed;
+            document.getElementById('modal-vtime').innerText = timeStr;
+            
+            const modal = new bootstrap.Modal(document.getElementById('evidenceModal'));
+            modal.show();
+        }
+
+        setInterval(fetchStats, 300);
+        setInterval(fetchChartData, 2000);
+        setInterval(fetchViolations, 1000);
+        fetchStats();
+        fetchChartData();
+        fetchViolations();
+
+        window.addEventListener('DOMContentLoaded', function() {
+            const videoImg = document.querySelector('.video-stream');
+            if (videoImg) {
+                videoImg.src = "/video_feed?t=" + new Date().getTime();
+            }
+        });
+    </script>
+</body>
+</html>
